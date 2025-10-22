@@ -2,46 +2,81 @@
 """
 Azure App Service entry point for Azure Pricing MCP Server
 
-This module provides a Flask wrapper for the MCP server to work with Azure App Service.
-It runs the MCP server in HTTP mode and provides health check endpoints.
+This module provides a Flask wrapper that directly integrates MCP tools
+for Azure App Service deployment.
 """
 
 from flask import Flask, request, jsonify
-import subprocess
 import sys
 import os
-import threading
-import time
-import requests
-from azure_pricing_mcp import main as mcp_main
+import asyncio
+import json
+from typing import Dict, Any
+
+# Import the MCP tools directly
+from azure_pricing_mcp import (
+    azure_get_service_prices,
+    azure_compare_region_prices,
+    azure_search_sku_prices,
+    azure_get_service_families,
+    azure_calculate_savings_plan,
+    ServicePricesInput,
+    RegionComparisonInput,
+    SKUSearchInput,
+    ServiceFamiliesInput,
+    SavingsPlanInput
+)
 
 # Create Flask app
 app = Flask(__name__)
 
-# Global variable to track MCP server process
-mcp_process = None
-mcp_thread = None
+# MCP tool registry
+MCP_TOOLS = {
+    "azure_get_service_prices": {
+        "func": azure_get_service_prices,
+        "input_model": ServicePricesInput,
+        "description": "Get Azure retail prices with comprehensive filtering"
+    },
+    "azure_compare_region_prices": {
+        "func": azure_compare_region_prices,
+        "input_model": RegionComparisonInput,
+        "description": "Compare prices across multiple Azure regions"
+    },
+    "azure_search_sku_prices": {
+        "func": azure_search_sku_prices,
+        "input_model": SKUSearchInput,
+        "description": "Search for SKU pricing using flexible terms"
+    },
+    "azure_get_service_families": {
+        "func": azure_get_service_families,
+        "input_model": ServiceFamiliesInput,
+        "description": "List available Azure service families"
+    },
+    "azure_calculate_savings_plan": {
+        "func": azure_calculate_savings_plan,
+        "input_model": SavingsPlanInput,
+        "description": "Calculate savings plan benefits"
+    }
+}
 
-def start_mcp_server():
-    """Start the MCP server in a separate thread."""
-    global mcp_thread
+async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """Execute an MCP tool with the given arguments."""
+    if tool_name not in MCP_TOOLS:
+        raise ValueError(f"Unknown tool: {tool_name}")
     
-    def run_mcp():
-        # Override sys.argv to set HTTP transport
-        original_argv = sys.argv
-        try:
-            sys.argv = ['azure_pricing_mcp.py', '--transport', 'http', '--port', '8001']
-            mcp_main()
-        except Exception as e:
-            print(f"Error starting MCP server: {e}")
-        finally:
-            sys.argv = original_argv
+    tool_info = MCP_TOOLS[tool_name]
+    input_model = tool_info["input_model"]
+    tool_func = tool_info["func"]
     
-    mcp_thread = threading.Thread(target=run_mcp, daemon=True)
-    mcp_thread.start()
+    # Validate and create input model
+    try:
+        validated_input = input_model(**arguments)
+    except Exception as e:
+        raise ValueError(f"Invalid arguments for {tool_name}: {str(e)}")
     
-    # Wait a moment for the server to start
-    time.sleep(2)
+    # Execute the tool
+    result = await tool_func(validated_input)
+    return result
 
 @app.route('/')
 def index():
@@ -52,81 +87,96 @@ def index():
         "description": "Model Context Protocol server for Azure retail pricing information",
         "endpoints": {
             "health": "/health",
-            "mcp": "http://localhost:8001",
+            "tools": "/tools",
             "docs": "/docs"
-        }
+        },
+        "available_tools": list(MCP_TOOLS.keys())
     })
 
 @app.route('/health')
 def health():
     """Health check endpoint for Azure App Service."""
     try:
-        # Check if MCP server is responding
-        response = requests.get('http://localhost:8001', timeout=5)
-        if response.status_code == 200:
-            return jsonify({"status": "healthy", "mcp_server": "running"}), 200
-        else:
-            return jsonify({"status": "unhealthy", "mcp_server": "not responding"}), 503
-    except requests.exceptions.RequestException:
-        return jsonify({"status": "unhealthy", "mcp_server": "not accessible"}), 503
+        # Test a simple tool execution to ensure everything is working
+        asyncio.run(execute_mcp_tool("azure_get_service_families", {"limit": 1}))
+        return jsonify({"status": "healthy", "mcp_tools": "operational"}), 200
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 503
 
 @app.route('/docs')
 def docs():
     """Documentation endpoint."""
+    tools_info = []
+    for tool_name, tool_data in MCP_TOOLS.items():
+        tools_info.append({
+            "name": tool_name,
+            "description": tool_data["description"]
+        })
+    
     return jsonify({
         "title": "Azure Pricing MCP Server API",
         "description": "This server provides Model Context Protocol tools for Azure pricing analysis",
-        "tools": [
-            {
-                "name": "azure_get_service_prices",
-                "description": "Get Azure retail prices with comprehensive filtering"
-            },
-            {
-                "name": "azure_compare_region_prices", 
-                "description": "Compare prices across multiple Azure regions"
-            },
-            {
-                "name": "azure_search_sku_prices",
-                "description": "Search for SKU pricing using flexible terms"
-            },
-            {
-                "name": "azure_get_service_families",
-                "description": "List available Azure service families"
-            },
-            {
-                "name": "azure_calculate_savings_plan",
-                "description": "Calculate savings plan benefits"
+        "tools": tools_info,
+        "usage": {
+            "endpoint": "/tools",
+            "method": "POST",
+            "format": {
+                "tool_name": "string",
+                "arguments": "object"
             }
-        ],
-        "mcp_endpoint": "http://localhost:8001",
-        "transport": "HTTP",
+        },
         "documentation": "https://github.com/matt-edwards-aztech/AzurePricingMCP"
     })
 
-@app.route('/api/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_to_mcp(path):
-    """Proxy API requests to the MCP server."""
+@app.route('/tools', methods=['POST'])
+def execute_tool():
+    """Execute an MCP tool with the provided arguments."""
     try:
-        mcp_url = f'http://localhost:8001/{path}'
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
         
-        if request.method == 'GET':
-            response = requests.get(mcp_url, params=request.args, timeout=30)
-        elif request.method == 'POST':
-            response = requests.post(mcp_url, json=request.json, timeout=30)
-        elif request.method == 'PUT':
-            response = requests.put(mcp_url, json=request.json, timeout=30)
-        elif request.method == 'DELETE':
-            response = requests.delete(mcp_url, timeout=30)
+        tool_name = data.get('tool_name') or data.get('name')
+        arguments = data.get('arguments', {})
         
-        return response.content, response.status_code, response.headers.items()
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"MCP server error: {str(e)}"}), 503
+        if not tool_name:
+            return jsonify({"error": "tool_name is required"}), 400
+        
+        # Execute the tool
+        result = asyncio.run(execute_mcp_tool(tool_name, arguments))
+        
+        return jsonify({
+            "tool_name": tool_name,
+            "result": result,
+            "status": "success"
+        })
+        
+    except ValueError as e:
+        return jsonify({"error": str(e), "status": "validation_error"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "execution_error"}), 500
+
+@app.route('/tools/<tool_name>', methods=['POST'])
+def execute_specific_tool(tool_name):
+    """Execute a specific MCP tool by name."""
+    try:
+        arguments = request.get_json() or {}
+        
+        # Execute the tool
+        result = asyncio.run(execute_mcp_tool(tool_name, arguments))
+        
+        return jsonify({
+            "tool_name": tool_name,
+            "result": result,
+            "status": "success"
+        })
+        
+    except ValueError as e:
+        return jsonify({"error": str(e), "status": "validation_error"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "execution_error"}), 500
 
 if __name__ == "__main__":
-    # Start the MCP server
-    start_mcp_server()
-    
     # Get port from environment variable (Azure App Service default)
     port = int(os.environ.get('PORT', 8000))
     
