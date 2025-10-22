@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "azure-pricing": {
+      "command": "python",
+      "args": [C:\ai\PricingCalculator/azure_pricing_mcp.py],
+      "env": {},
+      "disabled": false
+    }
+  }
+}
