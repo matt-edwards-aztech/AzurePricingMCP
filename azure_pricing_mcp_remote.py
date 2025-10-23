@@ -425,12 +425,18 @@ if __name__ == "__main__":
     # Get port from environment variable (Azure App Service default)
     port = int(os.environ.get('PORT', 8000))
     
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    logger.info(f"Starting Azure Pricing Remote MCP Server on port {port}")
+    
     # Run the server
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=port,
-        log_level="info",
-        ws_ping_interval=20,
-        ws_ping_timeout=20
+        log_level="info"
     )

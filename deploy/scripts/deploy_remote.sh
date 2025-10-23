@@ -8,7 +8,7 @@ set -e
 # Default values
 RESOURCE_GROUP=${1:-"azure-pricing-mcp-remote-rg"}
 APP_NAME=${2:-"azure-pricing-mcp-remote"}
-LOCATION=${3:-"eastus"}
+LOCATION=${3:-"uksouth"}
 SUBSCRIPTION_ID=${4:-""}
 
 echo "🚀 Deploying Remote Azure Pricing MCP Server to Azure App Service"
@@ -77,7 +77,7 @@ import os
 # Create a zip file with remote MCP files
 with zipfile.ZipFile('$TEMP_ZIP', 'w') as zipf:
     # Add Python files for remote MCP
-    for file in ['azure_pricing_mcp.py', 'azure_pricing_mcp_remote.py', 'app_remote.py', 'setup.py']:
+    for file in ['azure_pricing_mcp.py', 'azure_pricing_mcp_remote.py', 'app_remote.py', 'setup.py', 'startup.sh']:
         if os.path.exists(file):
             zipf.write(file)
     
@@ -108,7 +108,7 @@ echo "⚙️  Configuring startup command for remote MCP..."
 az webapp config set \
     --resource-group "$RESOURCE_GROUP" \
     --name "$WEB_APP_NAME" \
-    --startup-file "python app_remote.py"
+    --startup-file "python -m uvicorn azure_pricing_mcp_remote:app --host 0.0.0.0 --port 8000"
 
 # Configure app settings for WebSocket support
 echo "🔧 Configuring WebSocket settings..."
@@ -118,7 +118,8 @@ az webapp config appsettings set \
     --settings \
         SCM_DO_BUILD_DURING_DEPLOYMENT=true \
         WEBSITES_PORT=8000 \
-        WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
+        WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+        PYTHONPATH=/home/site/wwwroot
 
 # Wait for deployment to complete
 echo "⏳ Waiting for deployment to complete..."
