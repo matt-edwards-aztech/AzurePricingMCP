@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "azure-pricing": {
+      "command": "curl",
+      "args": [
+        "-s",
+        "-X", "POST", 
+        "https://azure-pricing-mcp.azurewebsites.net/tools",
+        "-H", "Content-Type: application/json",
+        "-d", "@-"
+      ]
+    }
+  }
+}

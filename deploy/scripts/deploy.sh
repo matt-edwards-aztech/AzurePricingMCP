@@ -52,11 +52,11 @@ DEPLOYMENT_OUTPUT=$(az deployment group create \
     --resource-group "$RESOURCE_GROUP" \
     --template-file "$BICEP_PATH" \
     --parameters appName="$APP_NAME" location="$LOCATION" \
-    --query 'properties.outputs' \
-    --output json)
+    --output tsv \
+    --query 'properties.outputs.webAppUrl.value')
 
-WEB_APP_URL=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.webAppUrl.value')
-WEB_APP_NAME=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.webAppName.value')
+WEB_APP_URL="$DEPLOYMENT_OUTPUT"
+WEB_APP_NAME="$APP_NAME"
 
 echo "✅ Azure resources deployed successfully!"
 echo "   Web App Name: $WEB_APP_NAME"

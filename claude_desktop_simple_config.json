@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "azure-pricing": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "env": {
+        "FETCH_BASE_URL": "https://azure-pricing-mcp.azurewebsites.net"
+      }
+    }
+  }
+}
