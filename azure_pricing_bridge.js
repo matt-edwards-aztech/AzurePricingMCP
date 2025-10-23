@@ -16,12 +16,15 @@ const rl = readline.createInterface({
   terminal: false
 });
 
+// Keep the process alive
+process.stdin.resume();
+
 function log(message) {
   console.error(`[Azure Pricing Bridge] ${new Date().toISOString()} ${message}`);
 }
 
 function sendResponse(response) {
-  console.log(JSON.stringify(response));
+  process.stdout.write(JSON.stringify(response) + '\n');
 }
 
 function makeHttpRequest(endpoint, data = null) {
@@ -97,6 +100,7 @@ async function handleMessage(message) {
         
       case 'notifications/initialized':
         // No response needed for notifications
+        log('MCP client initialized');
         break;
         
       case 'tools/list':
@@ -235,6 +239,7 @@ rl.on('line', async (line) => {
   
   try {
     const message = JSON.parse(line);
+    log(`Received message: ${message.method}`);
     await handleMessage(message);
   } catch (error) {
     log(`JSON parse error: ${error.message}`);
@@ -250,8 +255,11 @@ rl.on('line', async (line) => {
 });
 
 rl.on('close', () => {
-  log('Bridge closing');
-  process.exit(0);
+  log('Input stream closed');
+});
+
+rl.on('error', (error) => {
+  log(`Readline error: ${error.message}`);
 });
 
 // Handle process signals
